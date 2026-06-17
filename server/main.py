@@ -192,6 +192,7 @@ try:
         format_search_results,
         extract_core_keywords,
         extract_patent_ids,
+        search_tavily,
     )
 except Exception as _import_err:
     import traceback
@@ -408,13 +409,17 @@ async def run_ai_review(form_data: dict, images: list = None) -> str:
     # ── Step 3: LLM 分析 ──
     prompt = build_analysis_prompt(form_data, search_text, image_description)
 
-    # 优先 OpenRouter Claude（有余额），fallback Gemini → DeepSeek
+    # 🧠 OpenRouter Claude（自己搜索+分析，最准确）
     if OPENROUTER_KEY:
-        result = await _llm_analyze_openrouter(prompt)
+        product_info = build_review_prompt(form_data)
+        if image_description:
+            product_info += f"\n\n## 产品图片分析\n{image_description}"
+        result = await _llm_analyze_openrouter(product_info, form_data)
         if result and len(result) > 100:
             return result
-        log.warning(f"[{product_label}] OpenRouter failed, fallback to Gemini")
+        log.warning(f"[{product_label}] OpenRouter Claude failed, fallback to Gemini+Tavily")
 
+    # 📊 Fallback: Gemini 分析预搜索数据
     if GEMINI_API_KEY:
         result = await _llm_analyze_gemini(prompt)
         if result and len(result) > 100:
@@ -488,34 +493,95 @@ async def _llm_analyze_gemini(prompt: str) -> str:
         return ""
 
 
-async def _llm_analyze_openrouter(prompt: str) -> str:
-    """OpenRouter Claude Sonnet 4（通过 OpenRouter 代理，支持国内支付）"""
+async def _llm_analyze_openrouter(product_info: str, form_data: dict) -> str:
+    """Claude via OpenRouter — Claude 自主决定搜索策略，调用 Tavily 工具"""
+    if not TAVILY_API_KEY:
+        log.warning("No TAVILY_API_KEY, Claude can't search")
+        return ""
+
+    tools = [{
+        "type": "function",
+        "function": {
+            "name": "web_search",
+            "description": "搜索互联网获取专利、商标、TRO、维权信息。用于查找设计专利、发明专利、商标注册、版权登记、TRO案件。每次搜索应使用精确关键词。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "搜索关键词（英文或中文）"}
+                },
+                "required": ["query"]
+            }
+        }
+    }]
+
+    search_task = f"""请对以下产品执行专利侵权审查。
+
+{product_info}
+
+审查步骤（按顺序执行，每步调用 web_search 获取真实数据）：
+1. 搜索设计专利：用产品核心关键词 + "design patent USD" 搜索
+2. 搜索发明专利：用核心关键词 + "patent USPTO claims" 搜索
+3. 搜索 TRO 案件：用核心关键词 + "TRO lawsuit Amazon sellers"
+4. 搜索中文维权预警：用核心关键词 + "专利侵权 TRO 跨境电商"
+5. 搜索商标：用品牌名/核心关键词 + "trademark USPTO"
+6. 搜索市场验证：用核心关键词 + "AliExpress Amazon sellers"
+
+每步必须先搜索再分析，严禁编造。搜索完成后输出完整审查报告。"""
+
+    messages = [{"role": "user", "content": search_task}]
+
     try:
         async with httpx.AsyncClient(timeout=600) as c:
-            r = await c.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {OPENROUTER_KEY}",
-                    "Content-Type": "application/json",
-                    "HTTP-Referer": "https://railway.app",
-                    "X-Title": "Patent Review Bot",
-                },
-                json={
-                    "model": "anthropic/claude-sonnet-4-20250514",
-                    "max_tokens": 8000,
-                    "temperature": 0.1,
-                    "messages": [
-                        {"role": "system", "content": FULL_SYSTEM_PROMPT},
-                        {"role": "user", "content": prompt},
-                    ],
-                },
-            )
-            if r.status_code == 200:
+            for turn in range(8):  # 最多 8 轮对话（搜索+分析）
+                r = await c.post(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {OPENROUTER_KEY}",
+                        "Content-Type": "application/json",
+                        "HTTP-Referer": "https://railway.app",
+                        "X-Title": "Patent Review Bot",
+                    },
+                    json={
+                        "model": "anthropic/claude-sonnet-4-20250514",
+                        "max_tokens": 4000,
+                        "temperature": 0.1,
+                        "messages": messages,
+                        "tools": tools,
+                        "tool_choice": "auto",
+                    },
+                )
+                if r.status_code != 200:
+                    log.warning(f"OpenRouter turn {turn}: {r.status_code}")
+                    break
+
                 data = r.json()
-                return data["choices"][0]["message"]["content"]
-            log.warning(f"OpenRouter returned {r.status_code}: {r.text[:200]}")
+                choice = data["choices"][0]
+                msg = choice["message"]
+
+                # Claude 决定调用工具
+                if msg.get("tool_calls"):
+                    messages.append({"role": "assistant", "content": None, "tool_calls": msg["tool_calls"]})
+
+                    for tc in msg["tool_calls"]:
+                        func = tc["function"]
+                        if func["name"] == "web_search":
+                            query = json.loads(func["arguments"]).get("query", "")
+                            log.info(f"Claude searching: {query[:100]}")
+                            result = await search_tavily(query, TAVILY_API_KEY)
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tc["id"],
+                                "content": result[:3000] if result else "无搜索结果",
+                            })
+                else:
+                    # Claude 完成分析，返回结果
+                    content = msg.get("content", "")
+                    if content and len(content) > 100:
+                        return content
+                    break
+
     except Exception as e:
-        log.error(f"OpenRouter failed: {e}")
+        log.error(f"OpenRouter Claude tool_use failed: {e}")
     return ""
 
 async def _llm_analyze_claude(prompt: str) -> str:
