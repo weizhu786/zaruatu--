@@ -188,12 +188,22 @@ def parse_chat_message(text: str) -> Optional[dict]:
 
 # ── AI 审查引擎（v2: 多源检索 + 完整五层框架）────────────────
 
-from search_engine import (
-    run_full_search,
-    format_search_results,
-    extract_core_keywords,
-    extract_patent_ids,
-)
+try:
+    from search_engine import (
+        run_full_search,
+        format_search_results,
+        extract_core_keywords,
+        extract_patent_ids,
+    )
+except Exception as _import_err:
+    import traceback
+    log.critical(f"Failed to import search_engine: {_import_err}")
+    log.critical(traceback.format_exc())
+    # 降级：定义占位函数
+    async def run_full_search(*a, **kw): return {}
+    def format_search_results(*a, **kw): return "（检索引擎加载失败）"
+    def extract_core_keywords(title): return [title]
+    def extract_patent_ids(text): return []
 
 # ── 完整系统提示词（基于 CLAUDE.md 五层框架）─────────────
 
@@ -619,6 +629,25 @@ async def test_search(q: str = "gutter cleaning tool", market: str = "US"):
         "total_searches": meta.get("total_searches", 0),
         "search_data_preview": formatted[:3000],
     }
+
+
+@app.get("/debug")
+async def debug_info():
+    """调试端点：显示运行环境信息"""
+    import platform, sys as _sys
+    info = {
+        "python": _sys.version,
+        "platform": platform.platform(),
+        "cwd": os.getcwd(),
+        "env_keys": [k for k in os.environ if not any(s in k.lower() for s in ('key', 'secret', 'token', 'pass'))],
+        "search_engine_ok": True,
+    }
+    try:
+        from search_engine import run_full_search
+    except Exception as e:
+        info["search_engine_ok"] = False
+        info["search_engine_error"] = str(e)
+    return info
 
 
 @app.get("/")
