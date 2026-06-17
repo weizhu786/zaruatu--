@@ -4,8 +4,8 @@
   "title": "Download own GitHub repository",
   "titleGenerationStatus": "success",
   "createdAt": 1781699313825,
-  "updatedAt": 1781705915516,
-  "lastResponseAt": 1781705915516,
+  "updatedAt": 1781707494534,
+  "lastResponseAt": 1781707494534,
   "sessionId": "c9c109a0-24db-47a5-b146-8763526e5f61",
   "providerState": {
     "providerSessionId": "c9c109a0-24db-47a5-b146-8763526e5f61"
@@ -13,12 +13,12 @@
   "currentNote": "欢迎.md",
   "usage": {
     "model": "opus",
-    "inputTokens": 160,
+    "inputTokens": 103,
     "cacheCreationInputTokens": 0,
-    "cacheReadInputTokens": 193408,
+    "cacheReadInputTokens": 215424,
     "contextWindow": 200000,
-    "contextTokens": 193568,
-    "percentage": 97,
+    "contextTokens": 215527,
+    "percentage": 100,
     "contextWindowIsAuthoritative": true
   }
 }
