@@ -521,88 +521,57 @@ async def run_full_search(
     tavily_api_key: str = "",
 ) -> dict:
     """
-    统一编排多源搜索，返回结构化结果给 LLM 分析。
+    统一编排多源搜索（Tavily 主力 + 专利网站辅助）。
 
-    搜索策略（按目标市场）：
-      - Google Patents（主力，免费，覆盖所有国家）
-      - Lens.org（补充，全球专利学术搜索）
-      - WIPO PATENTSCOPE（PCT 国际申请）
-      - Tavily（TRO/维权/市场/版权/Keith）
+    Tavily 可以搜索专利信息（patents.google.com 在搜索结果中会显示摘要）。
     """
     title = form_data.get("产品标题", "")
     name = form_data.get("产品名称", form_data.get("产品编号", ""))
     brand = form_data.get("品牌名", "")
     market = form_data.get("目标市场", "US").upper().strip()
 
-    # 核心关键词
     keywords = extract_core_keywords(title)
     primary_kw = keywords[0] if keywords else name
 
     log.info(f"Search: market={market}, keywords={keywords}, brand={brand}")
 
-    # ── 并行执行所有搜索 ──
+    results = {}
     tasks = {}
 
-    # 1. Google Patents — 主力检索（按目标市场 + 专利类型分别搜）
-    if "US" in market or market == "ALL":
-        tasks["gp_us_design"] = search_google_patents(
-            primary_kw, country="US", patent_type="design", max_results=8
-        )
-        tasks["gp_us_utility"] = search_google_patents(
-            primary_kw, country="US", patent_type="utility", max_results=10
-        )
-    else:
-        # 非 US 市场：全类型搜索
-        tasks[f"gp_{market}"] = search_google_patents(
-            primary_kw, country=market, max_results=10
-        )
-
-    # 2. 次要关键词补充搜索
-    if len(keywords) > 1 and keywords[1] != primary_kw:
-        tasks["gp_secondary"] = search_google_patents(
-            keywords[1], country="US", max_results=6
-        )
-
-    # 3. Lens.org — 补充全球专利搜索
-    tasks["lens"] = search_lens_patents(keywords, max_results=6)
-
-    # 4. WIPO PATENTSCOPE — 国际专利
-    tasks["wipo"] = search_wipo(keywords)
-
-    # 5. Tavily 多渠道搜索（如果有 API Key）
+    # ── Tavily 为主力检索引擎 ──
     if tavily_api_key:
+        # 设计专利
+        tasks["tavily_design"] = search_tavily(
+            f'"{primary_kw}" "design patent" site:patents.google.com US D', tavily_api_key)
+        # 发明专利
+        tasks["tavily_utility"] = search_tavily(
+            f'"{primary_kw}" patent USPTO claims site:patents.google.com', tavily_api_key)
         # TRO + Keith
-        tro_query = f'"{primary_kw}" TRO lawsuit Keith copyright Amazon sellers 2025 2026'
-        tasks["tavily_tro"] = search_tavily(tro_query, tavily_api_key)
-
+        tasks["tavily_tro"] = search_tavily(
+            f'"{primary_kw}" TRO lawsuit Keith copyright Amazon sellers 2025 2026', tavily_api_key)
         # 商标
-        if brand:
-            tm_query = f'"{brand}" trademark registration USPTO Amazon'
-        else:
-            tm_query = f'"{primary_kw}" trademark USPTO registered'
-        tasks["tavily_trademark"] = search_tavily(tm_query, tavily_api_key)
-
+        tm_q = f'"{brand}" trademark USPTO' if brand else f'"{primary_kw}" trademark registration USPTO'
+        tasks["tavily_trademark"] = search_tavily(tm_q, tavily_api_key)
         # 版权 + Keith
-        copyright_query = f'Keith "{primary_kw}" copyright VA registration lawsuit 2025 2026 Amazon'
-        tasks["tavily_copyright"] = search_tavily(copyright_query, tavily_api_key)
-
-        # 市场 + 供应商
-        market_query = f'"{primary_kw}" AliExpress Etsy sellers Amazon suppliers wholesale'
-        tasks["tavily_market"] = search_tavily(market_query, tavily_api_key)
-
-        # 跨境电商侵权预警
-        amz_query = f'"{primary_kw}" 侵权 专利 TRO 亚马逊 跨境 2025 2026 AMZ123'
-        tasks["tavily_amz"] = search_tavily(amz_query, tavily_api_key)
-
+        tasks["tavily_copyright"] = search_tavily(
+            f'Keith "{primary_kw}" copyright VA registration 2025 2026', tavily_api_key)
+        # 市场
+        tasks["tavily_market"] = search_tavily(
+            f'"{primary_kw}" AliExpress Amazon sellers suppliers 2025', tavily_api_key)
+        # 中文侵权预警
+        tasks["tavily_cn"] = search_tavily(
+            f'"{primary_kw}" 专利侵权 TRO 跨境电商 亚马逊 2025 2026', tavily_api_key)
         # 品牌诉讼
         if brand:
-            brand_query = f'"{brand}" Amazon lawsuit patent trademark infringement TRO'
-            tasks["tavily_brand"] = search_tavily(brand_query, tavily_api_key)
+            tasks["tavily_brand"] = search_tavily(
+                f'"{brand}" Amazon lawsuit patent trademark TRO', tavily_api_key)
 
-    # 6. ✨ 执行全部搜索（并行）
-    results = {}
+    # ── 专利网站辅助（可能被封，有就更好）──
+    tasks["patent_justia"] = search_google_patents(primary_kw, country=market, max_results=6)
+    tasks["patent_wipo"] = search_wipo(keywords)
+
+    # ── 执行全部搜索 ──
     log.info(f"Running {len(tasks)} parallel searches...")
-
     gathered = await asyncio.gather(*tasks.values(), return_exceptions=True)
     for key, result in zip(tasks.keys(), gathered):
         if isinstance(result, Exception):
@@ -611,26 +580,24 @@ async def run_full_search(
         else:
             results[key] = result
 
-    # ── 提取所有专利 ID 并批量获取详情 ──
+    # ── 从所有搜索结果提取专利号 ──
     all_patent_ids = set()
-
-    # 从 Google Patents 结果
-    for key in list(results.keys()):
-        if key.startswith("gp_"):
-            google_data = results.get(key, {})
-            items = google_data.get("results", []) if isinstance(google_data, dict) else []
+    for key, val in results.items():
+        if isinstance(val, str) and val:
+            ids = extract_patent_ids(val)
+            all_patent_ids.update(ids)
+        elif isinstance(val, dict):
+            items = val.get("results", []) if isinstance(val, dict) else []
             for item in items:
                 if isinstance(item, dict) and item.get("id"):
                     all_patent_ids.add(item["id"])
+        elif isinstance(val, list):
+            for item in val:
+                if isinstance(item, dict) and item.get("id"):
+                    all_patent_ids.add(item["id"])
 
-    # 从 Lens.org 结果
-    lens_results = results.get("lens", []) or []
-    for item in lens_results:
-        if isinstance(item, dict) and item.get("id"):
-            all_patent_ids.add(item["id"])
-
-    # 批量获取前 10 个专利详情（设计专利优先，因为最需要视觉比对信息）
-    design_ids = [pid for pid in all_patent_ids if pid.startswith("USD") or pid.startswith("D")]
+    # 批量获取前 10 个专利详情
+    design_ids = [pid for pid in all_patent_ids if "USD" in pid or pid.startswith("D")]
     utility_ids = [pid for pid in all_patent_ids if pid not in design_ids]
     top_ids = (design_ids + utility_ids)[:10]
     patent_details = await batch_fetch_patents(top_ids)
@@ -646,8 +613,8 @@ async def run_full_search(
         "patent_ids_found": sorted(all_patent_ids),
     }
 
-    log.info(f"Search complete: {len(all_patent_ids)} patents found, "
-             f"{len(patent_details)} details fetched from Google Patents")
+    log.info(f"Search complete: {len(all_patent_ids)} patents, "
+             f"{len(patent_details)} details from {len(tasks)} sources")
 
     return results
 
