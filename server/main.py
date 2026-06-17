@@ -398,17 +398,18 @@ async def run_ai_review(form_data: dict, images: list = None) -> str:
     # ── Step 3: LLM 分析 ──
     prompt = build_analysis_prompt(form_data, search_text, image_description)
 
-    # 优先用 Gemini（支持更大上下文 + 更准确），fallback DeepSeek
-    if GEMINI_API_KEY:
-        result = await _llm_analyze_gemini(prompt)
-        if result and len(result) > 100:
-            return result
-        log.warning(f"[{product_label}] Gemini failed/incomplete, fallback to DeepSeek")
-
+    # 优先 Claude（最准确），fallback Gemini → DeepSeek
     if ANTHROPIC_API_KEY:
         result = await _llm_analyze_claude(prompt)
         if result and len(result) > 100:
             return result
+        log.warning(f"[{product_label}] Claude failed, fallback to Gemini")
+
+    if GEMINI_API_KEY:
+        result = await _llm_analyze_gemini(prompt)
+        if result and len(result) > 100:
+            return result
+        log.warning(f"[{product_label}] Gemini failed, fallback to DeepSeek")
 
     if OPENAI_API_KEY:
         return await _llm_analyze_deepseek(prompt)
@@ -478,7 +479,7 @@ async def _llm_analyze_gemini(prompt: str) -> str:
 
 
 async def _llm_analyze_claude(prompt: str) -> str:
-    """Claude API（备选，最准确但需付费）"""
+    """Claude Sonnet 4 分析（最准确）"""
     try:
         async with httpx.AsyncClient(timeout=600) as c:
             r = await c.post(
@@ -491,13 +492,15 @@ async def _llm_analyze_claude(prompt: str) -> str:
                 json={
                     "model": "claude-sonnet-4-20250514",
                     "max_tokens": 8000,
+                    "temperature": 0.1,
                     "system": FULL_SYSTEM_PROMPT,
                     "messages": [{"role": "user", "content": prompt}],
                 },
             )
             if r.status_code == 200:
-                return r.json()["content"][0]["text"]
-            log.warning(f"Claude API returned {r.status_code}")
+                data = r.json()
+                return data["content"][0]["text"]
+            log.warning(f"Claude API returned {r.status_code}: {r.text[:200]}")
     except Exception as e:
         log.error(f"Claude analysis failed: {e}")
     return ""
