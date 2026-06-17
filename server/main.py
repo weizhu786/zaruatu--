@@ -407,18 +407,18 @@ async def run_ai_review(form_data: dict, images: list = None) -> str:
     # ── Step 3: LLM 分析 ──
     prompt = build_analysis_prompt(form_data, search_text, image_description)
 
-    # 优先 Claude（最准确），fallback Gemini → DeepSeek
-    if ANTHROPIC_API_KEY:
-        result = await _llm_analyze_claude(prompt)
-        if result and len(result) > 100:
-            return result
-        log.warning(f"[{product_label}] Claude failed, fallback to Gemini")
-
+    # 优先 Gemini（免费 1500次/天），Claude 有余额时自动切换
     if GEMINI_API_KEY:
         result = await _llm_analyze_gemini(prompt)
         if result and len(result) > 100:
             return result
-        log.warning(f"[{product_label}] Gemini failed, fallback to DeepSeek")
+        log.warning(f"[{product_label}] Gemini failed, fallback to Claude")
+
+    if ANTHROPIC_API_KEY:
+        result = await _llm_analyze_claude(prompt)
+        if result and len(result) > 100:
+            return result
+        log.warning(f"[{product_label}] Claude failed, fallback to DeepSeek")
 
     if OPENAI_API_KEY:
         return await _llm_analyze_deepseek(prompt)
