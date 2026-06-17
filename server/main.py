@@ -628,6 +628,34 @@ async def test_search(q: str = "gutter cleaning tool", market: str = "US"):
     }
 
 
+@app.get("/raw-google-patents")
+async def raw_google_patents(q: str = "hat clip", type: str = "patent"):
+    """诊断端点：返回 Google Patents 原始 HTML（前 5000 字符）"""
+    import httpx as _httpx
+    url = f"https://patents.google.com/?q={q}&type={type}&status=GRANT&country=US&num=5"
+    try:
+        async with _httpx.AsyncClient(timeout=15) as c:
+            r = await c.get(url, headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Accept": "text/html",
+            })
+            html = r.text
+            # 提取关键部分
+            snippets = []
+            # 搜索 patent 相关链接
+            for m in re.finditer(r'href="[^"]*patent[^"]*"', html, re.IGNORECASE):
+                snippets.append(m.group())
+            for m in re.finditer(r'(?:US|WO|EP|CN|JP|KR)\d{4,}[A-Z]?\d*', html):
+                snippets.append(m.group())
+            return {
+                "status": r.status_code,
+                "html_length": len(html),
+                "patent_links": snippets[:50],
+                "html_head": html[:2000],
+            }
+    except Exception as e:
+        return {"error": str(e)}
+
 @app.get("/debug")
 async def debug_info():
     """调试端点：显示运行环境信息"""
