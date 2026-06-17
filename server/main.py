@@ -660,11 +660,22 @@ async def raw_google_patents(q: str = "hat clip", type: str = "patent"):
 async def debug_info():
     """调试端点：显示运行环境信息"""
     import platform, sys as _sys
+    # 安全地检查敏感变量
+    sensitive = {
+        "TAVILY_API_KEY": bool(TAVILY_API_KEY),
+        "GEMINI_API_KEY": bool(GEMINI_API_KEY),
+        "OPENAI_API_KEY": bool(OPENAI_API_KEY),
+        "ANTHROPIC_API_KEY": bool(ANTHROPIC_API_KEY),
+        "FEISHU_APP_ID": bool(FEISHU_APP_ID),
+        "TAVILY_len": len(TAVILY_API_KEY),
+        "GEMINI_len": len(GEMINI_API_KEY),
+        "OPENAI_len": len(OPENAI_API_KEY),
+    }
     info = {
         "python": _sys.version,
         "platform": platform.platform(),
         "cwd": os.getcwd(),
-        "env_keys": [k for k in os.environ if not any(s in k.lower() for s in ('key', 'secret', 'token', 'pass'))],
+        "sensitive_vars": sensitive,
         "search_engine_ok": True,
     }
     try:
