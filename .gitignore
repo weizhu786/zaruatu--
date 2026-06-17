@@ -1,0 +1,26 @@
+# Obsidian 内部配置（个人/本地，不应共享）
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+.obsidian/hotkeys.json
+.obsidian/core-plugins.json
+.obsidian/core-plugins-migration.json
+.obsidian/community-plugins.json
+.obsidian/graph.json
+
+# 系统文件
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# 临时文件
+*.tmp
+*.bak
+*~
+
+# Python 缓存
+__pycache__/
+*.pyc
+
+# 密钥（不提交）
+server/.env
+.env

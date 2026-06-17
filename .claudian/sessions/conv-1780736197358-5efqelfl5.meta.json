@@ -1,0 +1,23 @@
+{
+  "id": "conv-1780736197358-5efqelfl5",
+  "providerId": "claude",
+  "title": "Explain AI assistant capabilities",
+  "titleGenerationStatus": "success",
+  "createdAt": 1780736197360,
+  "updatedAt": 1781601626626,
+  "lastResponseAt": 1781601626626,
+  "sessionId": "bcdf7413-500f-4d60-9a6f-50a3027710a6",
+  "providerState": {
+    "providerSessionId": "bcdf7413-500f-4d60-9a6f-50a3027710a6"
+  },
+  "usage": {
+    "model": "opus",
+    "inputTokens": 87,
+    "cacheCreationInputTokens": 0,
+    "cacheReadInputTokens": 285824,
+    "contextWindow": 200000,
+    "contextTokens": 285911,
+    "percentage": 100,
+    "contextWindowIsAuthoritative": true
+  }
+}

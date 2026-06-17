@@ -1,0 +1,24 @@
+{
+  "id": "conv-1781699313825-747qb7gg3",
+  "providerId": "claude",
+  "title": "Download own GitHub repository",
+  "titleGenerationStatus": "success",
+  "createdAt": 1781699313825,
+  "updatedAt": 1781701319216,
+  "lastResponseAt": 1781701319216,
+  "sessionId": "c9c109a0-24db-47a5-b146-8763526e5f61",
+  "providerState": {
+    "providerSessionId": "c9c109a0-24db-47a5-b146-8763526e5f61"
+  },
+  "currentNote": "欢迎.md",
+  "usage": {
+    "model": "opus",
+    "inputTokens": 52,
+    "cacheCreationInputTokens": 0,
+    "cacheReadInputTokens": 119552,
+    "contextWindow": 200000,
+    "contextTokens": 119604,
+    "percentage": 60,
+    "contextWindowIsAuthoritative": true
+  }
+}
