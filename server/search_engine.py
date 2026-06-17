@@ -557,9 +557,13 @@ async def run_full_search(
             f'"{primary_kw}" TRO "temporary restraining order" OR "临时禁令" Amazon 2024 2025 2026',
             tavily_api_key)
 
-        # 跨境电商维权预警（中文社区，含专利号）
+        # 跨境电商维权预警（中文社区 + 权利人名称搜索）
         tasks["tavily_cn"] = search_tavily(
-            f'{primary_kw} 专利维权 侵权 TRO 亚马逊 sellerdefense worldtro AMZ123 2024 2025 2026',
+            f'{primary_kw} 磁吸 钥匙盒 专利维权 侵权 TRO 亚马逊 sellerdefense worldtro AMZ123 卖家 冻结 2024 2025 2026',
+            tavily_api_key)
+        # 权利人+专利号搜索（维权文章标题格式："品牌+专利号+维权"）
+        tasks["tavily_owner"] = search_tavily(
+            f'"{primary_kw}" "USD" OR "US" patent owner lawsuit Amazon 50 sellers 2024 2025',
             tavily_api_key)
 
         # Keith 版权专项
