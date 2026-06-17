@@ -674,6 +674,41 @@ async def raw_google_patents(q: str = "hat clip", type: str = "patent"):
     except Exception as e:
         return {"error": str(e)}
 
+@app.get("/test-claude")
+async def test_claude():
+    """测试 Claude API 连通性和余额"""
+    if not ANTHROPIC_API_KEY:
+        return {"status": "error", "msg": "ANTHROPIC_API_KEY not set"}
+    try:
+        async with httpx.AsyncClient(timeout=30) as c:
+            r = await c.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": ANTHROPIC_API_KEY,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": "claude-sonnet-4-20250514",
+                    "max_tokens": 50,
+                    "messages": [{"role": "user", "content": "Say hello in 3 words"}],
+                },
+            )
+            result = {
+                "status_code": r.status_code,
+                "key_prefix": ANTHROPIC_API_KEY[:12] + "...",
+            }
+            if r.status_code == 200:
+                data = r.json()
+                result["ok"] = True
+                result["reply"] = data["content"][0]["text"][:100] if data.get("content") else "no content"
+            else:
+                result["ok"] = False
+                result["error"] = r.text[:500]
+            return result
+    except Exception as e:
+        return {"status": "error", "msg": str(e)[:200]}
+
 @app.get("/debug")
 async def debug_info():
     """调试端点：显示运行环境信息"""
