@@ -90,7 +90,7 @@ def extract_patent_ids(text: str) -> list[str]:
 
 
 # ═══════════════════════════════════════════════════════════════
-# Google Patents 搜索
+# Justia Patents 搜索（服务端渲染 HTML，可解析）
 # ═══════════════════════════════════════════════════════════════
 
 async def search_google_patents(
@@ -100,136 +100,99 @@ async def search_google_patents(
     max_results: int = 10
 ) -> dict:
     """
-    搜索 Google Patents 并返回结构化结果。
+    搜索专利（通过 Justia Patents，支持服务端渲染）。
 
     返回: {
-        "results": [{"id": "US10184252B2", "title": "...", "snippet": "...", "url": "..."}],
-        "raw_html_length": int
+        "results": [{"id": "US10184252B2", "title": "...", "url": "..."}],
+        "query": str, "country": str, "source": str
     }
     """
-    type_param = {
-        "design": "design",
-        "utility": "utility",
-        "all": "patent"
-    }.get(patent_type, "patent")
-
-    status = "GRANT"
-    url = (
-        f"https://patents.google.com/?q={quote(query)}"
-        f"&type={type_param}&status={status}"
-        f"&country={country}&num={max_results}"
-    )
+    # Justia Patents 搜索 URL
+    url = f"https://patents.justia.com/search?q={quote(query)}"
 
     try:
-        async with httpx.AsyncClient(timeout=30) as c:
+        async with httpx.AsyncClient(timeout=25) as c:
             r = await c.get(
                 url,
                 headers={
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                    "Accept": "text/html,application/xhtml+xml",
-                    "Accept-Language": "en-US,en;q=0.9,zh-CN;q=0.8",
+                    "Accept": "text/html",
+                    "Accept-Language": "en-US,en;q=0.9",
                 },
                 follow_redirects=True,
             )
             r.raise_for_status()
             html = r.text
     except httpx.ConnectError as e:
-        log.warning(f"Google Patents: Cannot connect (network blocked?): {e}")
+        log.warning(f"Justia Patents: Cannot connect: {e}")
         return {"results": [], "error": f"Connection failed: {str(e)[:200]}"}
     except Exception as e:
-        log.warning(f"Google Patents search failed: {e}")
+        log.warning(f"Justia Patents search failed: {e}")
         return {"results": [], "error": str(e)[:200]}
 
-    # 解析搜索结果
-    results = _parse_google_patents_results(html, country)
+    results = _parse_justia_results(html, country, patent_type)
     return {
         "results": results[:max_results],
         "query": query,
         "country": country,
-        "source": "Google Patents",
+        "source": "Justia Patents",
     }
 
 
-def _parse_google_patents_results(html: str, country: str) -> list[dict]:
-    """从 Google Patents 搜索结果页提取专利信息（多模式匹配）"""
+def _parse_justia_results(html: str, country: str, patent_type: str) -> list[dict]:
+    """从 Justia Patents 搜索结果页提取专利信息"""
     results = []
     seen_ids = set()
 
-    # 模式1: <a href="/patent/XX123/en">Title</a>
+    # Justia 结果格式:
+    # <a href="/patent/2025/.../US10184252B2">Title</a>
+    # 或 <h5><a href="/patent/.../USD897062">Title</a></h5>
+
+    # 模式1: /patent/YEAR/.../PATENT_ID
     for m in re.finditer(
-        r'href="(/patent/([A-Z]{2,4}\d+[A-Z]?\d*)(?:/[a-z]{2})?)"[^>]*>',
+        r'/patent/\d{4}/[^"]*?/([A-Z]{2,4}\d{4,}[A-Z]?\d*)[^"]*',
         html, re.IGNORECASE
     ):
-        pid = m.group(2).upper()
+        pid = m.group(1).upper()
         if pid in seen_ids:
             continue
         seen_ids.add(pid)
+        if _match_country_type(pid, country, patent_type):
+            results.append({"id": pid, "title": "", "url": f"https://patents.justia.com/patent/{pid}", "source": "Justia"})
 
-        # 尝试获取标题
-        tag_end = html.find('>', m.end())
-        next_close = html.find('</a>', m.end())
-        title_html = html[m.end():next_close] if next_close > 0 else ""
-        title = re.sub(r'<[^>]+>', '', title_html).strip()
-
-        if country_filter(pid, country):
-            results.append(build_result(pid, title))
-
-    # 模式2: <span class="result-title"> / <h3 class="result-title">
-    if not results:
-        for m in re.finditer(
-            r'(?:result-title|patent-result)[^>]*>\s*<a[^>]*href="[^"]*/([A-Z]{2,4}\d+[A-Z]?\d*)[^"]*"[^>]*>(.*?)</a>',
-            html, re.DOTALL | re.IGNORECASE
-        ):
-            pid = m.group(1).upper()
-            if pid in seen_ids:
-                continue
-            seen_ids.add(pid)
-            title = re.sub(r'<[^>]+>', '', m.group(2)).strip()
-            if country_filter(pid, country):
-                results.append(build_result(pid, title))
-
-    # 模式3: 搜索页面中任何 patent/XXNNNNNNN 链接
-    if not results:
-        for m in re.finditer(
-            r'/patent/([A-Z]{2,4}\d{4,}[A-Z]?\d*)/',
-            html, re.IGNORECASE
-        ):
-            pid = m.group(1).upper()
-            if pid not in seen_ids and country_filter(pid, country):
-                seen_ids.add(pid)
-                results.append(build_result(pid, ""))
-
-    # 模式4: 纯文本专利号匹配
-    if not results:
-        us_pat = re.findall(r'(?:USD?)\s*(\d[\d,]{4,}(?:[A-Z]\d)?)', html)
-        for num in us_pat:
-            pid = f"US{num.strip().replace(',','')}"
-            if pid not in seen_ids:
-                seen_ids.add(pid)
-                results.append(build_result(pid, ""))
+    # 模式2: 专利标题文本
+    if results:
+        for i, r in enumerate(results):
+            pid = r["id"]
+            # 找专利号附近的标题
+            title_pat = re.search(
+                re.escape(pid) + r'[^<]*</a>\s*(?:</h\d>\s*)?(?:<[^>]+>)?([^<]{10,200})',
+                html, re.IGNORECASE
+            )
+            if not title_pat:
+                # 尝试找 <a> 标签内的文本
+                title_pat = re.search(
+                    r'href="[^"]*' + re.escape(pid) + r'[^"]*"[^>]*>([^<]{5,200})</a>',
+                    html, re.IGNORECASE
+                )
+            if title_pat:
+                results[i]["title"] = title_pat.group(1).strip()[:200]
 
     return results
 
 
-def country_filter(pid: str, country: str) -> bool:
-    """检查专利号是否属于目标国家"""
-    if not country or country == "ALL":
-        return True
-    prefixes = {"US": ["US"], "CN": ["CN"], "EP": ["EP"],
-                "JP": ["JP"], "KR": ["KR"], "AU": ["AU"],
-                "CA": ["CA"], "DE": ["DE"], "FR": ["FR"],
-                "GB": ["GB"], "WO": ["WO"]}
-    allowed = prefixes.get(country, [country])
-    return any(pid.startswith(p) for p in allowed)
-
-
-def build_result(pid: str, title: str) -> dict:
-    return {
-        "id": pid,
-        "title": title[:200] if title else "",
-        "url": f"https://patents.google.com/patent/{pid}/en",
-        "source": "Google Patents",
-    }
+def _match_country_type(pid: str, country: str, patent_type: str) -> bool:
+    """检查专利号是否匹配目标国家和类型"""
+    if country and country != "ALL":
+        if country == "US" and not pid.startswith("US"):
+            return False
+    if patent_type == "design":
+        if not (pid.startswith("USD") or pid.startswith("D")):
+            return False
+    elif patent_type == "utility":
+        if pid.startswith("USD") or pid.startswith("D"):
+            return False
+    return True
 
 
 async def fetch_patent_detail(patent_id: str) -> dict:
