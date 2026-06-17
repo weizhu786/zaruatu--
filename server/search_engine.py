@@ -708,4 +708,87 @@ def format_search_results(results: dict) -> str:
             parts.append(text[:1500])
             parts.append("")
 
+    # ── ⚠️ 已知风险数据库（来自 wiki 审核记录）──
+    known = _load_known_risks(meta.get("keywords", []))
+    if known:
+        parts.insert(1, _format_known_risks(known))
+
     return "\n".join(parts)[:15000]
+
+
+# ═══════════════════════════════════════════════════════════════
+# 已知风险数据库（从 wiki 审核记录提取，Tavily 搜不到的兜底）
+# ═══════════════════════════════════════════════════════════════
+
+KNOWN_RISKS = None
+
+
+def _load_known_risks_data() -> dict:
+    global KNOWN_RISKS
+    if KNOWN_RISKS is not None:
+        return KNOWN_RISKS
+    try:
+        import json as _json
+        import os as _os
+        path = _os.path.join(_os.path.dirname(__file__), "known_risks.json")
+        with open(path, "r", encoding="utf-8") as f:
+            KNOWN_RISKS = _json.load(f)
+        return KNOWN_RISKS
+    except Exception:
+        KNOWN_RISKS = {}
+        return {}
+
+
+def _load_known_risks(keywords: list) -> dict:
+    """根据产品关键词匹配已知风险"""
+    data = _load_known_risks_data()
+    matched = {}
+    for kw in keywords:
+        kw_lower = kw.lower()
+        for category, info in data.items():
+            cat_keywords = info.get("keywords", [])
+            if any(k in kw_lower or kw_lower in k for k in cat_keywords):
+                matched[category] = info
+                break
+    return matched
+
+
+def _format_known_risks(matched: dict) -> str:
+    """格式化已知风险为 LLM 可读文本"""
+    lines = ["## ⚠️ 已知风险数据库（从历史审核记录提取，优先参考）", ""]
+    for category, info in matched.items():
+        lines.append(f"### 🚨 {category}（风险等级：{info.get('risk_level', 'unknown')}）")
+        if info.get("note"):
+            lines.append(f"> {info['note']}")
+        if info.get("design_patents"):
+            lines.append("| 设计专利 | 权利人 | 授权日 | 状态 |")
+            lines.append("|----------|--------|--------|:----:|")
+            for p in info["design_patents"]:
+                lines.append(f"| {p['id']} | {p.get('owner','')} | {p.get('date','')} | {p.get('status','')} |")
+            lines.append("")
+        if info.get("utility_patents"):
+            lines.append("| 发明专利 | 权利人 | 授权日 | 状态 | TRO |")
+            lines.append("|----------|--------|--------|:----:|:---:|")
+            for p in info["utility_patents"]:
+                lines.append(f"| {p['id']} | {p.get('owner','')} | {p.get('date','')} | {p.get('status','')} | {p.get('tro','')} |")
+            lines.append("")
+        if info.get("trademarks"):
+            lines.append("| 商标 | 权利人 | 状态 |")
+            lines.append("|------|--------|:----:|")
+            for t in info["trademarks"]:
+                lines.append(f"| {t.get('name','')} | {t.get('owner','')} | {t.get('status','')} |")
+            lines.append("")
+        if info.get("copyright"):
+            lines.append("| 版权号 | 作品名 | 权利人 | 代理律所 | TRO |")
+            lines.append("|--------|--------|--------|----------|-----|")
+            for c in info["copyright"]:
+                lines.append(f"| {c.get('id','')} | {c.get('title','')} | {c.get('owner','')} | {c.get('agent','')} | {c.get('tro','')} |")
+            lines.append("")
+        if info.get("tro_cases"):
+            lines.append("**TRO/诉讼案件：**")
+            for case in info["tro_cases"]:
+                lines.append(f"- 🔴 {case}")
+            lines.append("")
+    lines.append("---")
+    lines.append("> ⚠️ 以上数据来自知识库历史审核记录。必须结合实时搜索数据综合判断。")
+    return "\n".join(lines)

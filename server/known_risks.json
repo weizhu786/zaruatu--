@@ -1,0 +1,58 @@
+{
+  "magnetic key holder": {
+    "keywords": ["magnetic key", "key holder", "hide a key", "key box", "under car key"],
+    "design_patents": [
+      {"id": "USD1020230S", "title": "Magnetic Key Holder", "owner": "Jiaren Zhu", "date": "2024-04-02", "status": "有效"},
+      {"id": "D813317S", "title": "Magnetic Key Holder / Storage Device", "owner": "Jiaren Zhu", "date": "", "status": "有效"}
+    ],
+    "tro_cases": [
+      "24-cv-3128 (Jiaren Zhu, TRO 被拒但案件未撤, 50+ 卖家被诉)",
+      "24-cv-05028 (Jiaren Zhu, D813317S, 50+ 卖家)"
+    ],
+    "risk_level": "high",
+    "note": "品类完全重叠，专利权人已积极维权"
+  },
+  "gutter cleaning tool": {
+    "keywords": ["gutter cleaning", "gutter tool", "gutter scoop", "gutter hawg"],
+    "design_patents": [
+      {"id": "USD897062S", "title": "Rain gutter cleaning device with rotatable blade", "owner": "Glen Berkshire", "date": "2020-09-22", "status": "有效"}
+    ],
+    "utility_patents": [
+      {"id": "US10184252B2", "title": "Rain gutter cleaning tool", "owner": "The Gutter Tool LLC (Gutter Hawg)", "date": "2019-01-22", "status": "有效+已TRO执行", "tro": "23-cv-3344"}
+    ],
+    "trademarks": [
+      {"name": "GUTTER HAWG", "owner": "The Gutter Tool LLC", "status": "已注册+已TRO执行"}
+    ],
+    "tro_cases": [
+      "23-cv-3344 (Gutter Hawg, TRO 已执行, 核心专利 US10184252B2)"
+    ],
+    "risk_level": "high",
+    "note": "scraper+hook+threaded attachment 三项要素若全部覆盖即 No-Go"
+  },
+  "bee balloon": {
+    "keywords": ["bee balloon", "bee foil", "bee party", "honey bee decoration"],
+    "copyright": [
+      {"id": "VA 2-429-529", "title": "Honey Bee", "owner": "George Howard Nixon Jr. (Sunny SolWnd)", "agent": "Keith 律所", "tro": "26-cv-01145/01185/01187, 800+ 卖家"}
+    ],
+    "design_patents": [
+      {"id": "USD484198", "title": "Bee novelty", "owner": "Exhart Environmental", "date": "2003-12-23", "status": "已过期"}
+    ],
+    "risk_level": "high",
+    "note": "Nixon Keith 版权案是核心风险，图案实质性相似即 TRO"
+  },
+  "key hook": {
+    "keywords": ["key hook", "key holder wall", "home sweet home hook"],
+    "copyright": [
+      {"id": "VA 2-467-938", "title": "HOME SWEET HOME", "owner": "Vorotnikov", "agent": "Keith 律所", "tro": "26-cv-00422, 400+ 卖家"}
+    ],
+    "risk_level": "high",
+    "note": "即使内容看似通用（如 HOME SWEET HOME），仍可能有人登记版权并 Keith 批量执行"
+  },
+  "pink ribbon": {
+    "keywords": ["pink ribbon", "breast cancer", "awareness pin", "ribbon pin"],
+    "trademarks": [
+      {"name": "Susan G. Komen running ribbon", "owner": "Susan G. Komen Foundation", "status": "高风险已知商标"}
+    ],
+    "risk_level": "medium"
+  }
+}
