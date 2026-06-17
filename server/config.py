@@ -12,6 +12,7 @@ _CONFIG_KEYS = {
     "VISION_MODE": "openai",
     "GEMINI_API_KEY": "",
     "TAVILY_API_KEY": "",
+    "OPENROUTER_API_KEY": "",
 }
 
 
