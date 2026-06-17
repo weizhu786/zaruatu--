@@ -193,6 +193,7 @@ try:
         extract_core_keywords,
         extract_patent_ids,
         search_tavily,
+        fetch_patent_detail,
     )
 except Exception as _import_err:
     import traceback
@@ -494,45 +495,80 @@ async def _llm_analyze_gemini(prompt: str) -> str:
 
 
 async def _llm_analyze_openrouter(product_info: str, form_data: dict) -> str:
-    """Claude via OpenRouter — Claude 自主决定搜索策略，调用 Tavily 工具"""
+    """Claude via OpenRouter — 与 Obsidian 一致的搜索+分析能力"""
     if not TAVILY_API_KEY:
         log.warning("No TAVILY_API_KEY, Claude can't search")
         return ""
 
-    tools = [{
-        "type": "function",
-        "function": {
-            "name": "web_search",
-            "description": "搜索互联网获取专利、商标、TRO、维权信息。用于查找设计专利、发明专利、商标注册、版权登记、TRO案件。每次搜索应使用精确关键词。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "搜索关键词（英文或中文）"}
-                },
-                "required": ["query"]
+    # 读取完整 CLAUDE.md 作为系统提示词
+    try:
+        with open(os.path.join(os.path.dirname(__file__), "..", "CLAUDE.md"), "r", encoding="utf-8") as f:
+            full_claude_md = f.read()[:15000]
+    except Exception:
+        full_claude_md = FULL_SYSTEM_PROMPT
+
+    # Claude 可用的工具（匹配 Obsidian 的能力）
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "web_search",
+                "description": """搜索互联网，获取真实数据。用于：
+- 设计专利：搜索 "<产品关键词> design patent USD site:patents.google.com"
+- 发明专利：搜索 "<产品关键词> patent claims USPTO"
+- TRO/维权：搜索 "<产品关键词> TRO lawsuit Amazon sellers 2024 2025 2026"
+- 中文维权预警：搜索 "<中文关键词> 专利侵权 TRO 跨境电商 亚马逊 AMZ123 sellerdefense"
+- 商标：搜索 "<品牌名> trademark USPTO registration"
+- Keith 版权：搜索 "Keith <产品关键词> copyright VA lawsuit"
+- 市场验证：搜索 "<产品关键词> AliExpress Amazon sellers"
+每次搜索使用精确关键词，中英文各搜一次。""",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "搜索关键词"}
+                    },
+                    "required": ["query"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "fetch_patent",
+                "description": "获取专利详情页面内容。输入专利号（如 USD1020230S、US10184252B2），返回该专利的标题、摘要、权利要求等信息。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "patent_id": {"type": "string", "description": "专利号，如 USD1020230S 或 US10184252B2"}
+                    },
+                    "required": ["patent_id"]
+                }
             }
         }
-    }]
+    ]
 
-    search_task = f"""请对以下产品执行专利侵权审查。
+    # 完整审查指令
+    task = f"""{full_claude_md}
+
+---
+
+现在对以下产品执行五层专利侵权审查：
 
 {product_info}
 
-审查步骤（按顺序执行，每步调用 web_search 获取真实数据）：
-1. 搜索设计专利：用产品核心关键词 + "design patent USD" 搜索
-2. 搜索发明专利：用核心关键词 + "patent USPTO claims" 搜索
-3. 搜索 TRO 案件：用核心关键词 + "TRO lawsuit Amazon sellers"
-4. 搜索中文维权预警：用核心关键词 + "专利侵权 TRO 跨境电商"
-5. 搜索商标：用品牌名/核心关键词 + "trademark USPTO"
-6. 搜索市场验证：用核心关键词 + "AliExpress Amazon sellers"
+要求：
+1. 使用 web_search 和 fetch_patent 工具获取真实数据
+2. 严格执行上述 CLAUDE.md 中的五层框架和决策矩阵
+3. 每个专利号、商标号、案件号必须来自搜索结果
+4. 发现 TRO 必须标注 🔴TRO
+5. 按 CLAUDE.md 的决策矩阵输出最终结论（Go / 需修改 / No-Go）
+6. 输出格式：五层结构报告 + Claim Chart + 最终结论"""
 
-每步必须先搜索再分析，严禁编造。搜索完成后输出完整审查报告。"""
-
-    messages = [{"role": "user", "content": search_task}]
+    messages = [{"role": "user", "content": task}]
 
     try:
         async with httpx.AsyncClient(timeout=600) as c:
-            for turn in range(8):  # 最多 8 轮对话（搜索+分析）
+            for turn in range(10):
                 r = await c.post(
                     "https://openrouter.ai/api/v1/chat/completions",
                     headers={
@@ -551,37 +587,58 @@ async def _llm_analyze_openrouter(product_info: str, form_data: dict) -> str:
                     },
                 )
                 if r.status_code != 200:
-                    log.warning(f"OpenRouter turn {turn}: {r.status_code}")
+                    log.warning(f"OpenRouter turn {turn}: {r.status_code} {r.text[:200]}")
                     break
 
                 data = r.json()
                 choice = data["choices"][0]
                 msg = choice["message"]
 
-                # Claude 决定调用工具
                 if msg.get("tool_calls"):
                     messages.append({"role": "assistant", "content": None, "tool_calls": msg["tool_calls"]})
 
                     for tc in msg["tool_calls"]:
                         func = tc["function"]
+                        args = json.loads(func.get("arguments", "{}"))
+                        tool_result = ""
+
                         if func["name"] == "web_search":
-                            query = json.loads(func["arguments"]).get("query", "")
-                            log.info(f"Claude searching: {query[:100]}")
-                            result = await search_tavily(query, TAVILY_API_KEY)
-                            messages.append({
-                                "role": "tool",
-                                "tool_call_id": tc["id"],
-                                "content": result[:3000] if result else "无搜索结果",
-                            })
+                            query = args.get("query", "")
+                            log.info(f"Claude web_search: {query[:100]}")
+                            tool_result = await search_tavily(query, TAVILY_API_KEY) or "无搜索结果"
+
+                        elif func["name"] == "fetch_patent":
+                            pid = args.get("patent_id", "")
+                            log.info(f"Claude fetch_patent: {pid}")
+                            detail = await fetch_patent_detail(pid)
+                            if detail and not detail.get("error"):
+                                tool_result = (
+                                    f"专利号: {detail.get('id','')}\n"
+                                    f"标题: {detail.get('title','')}\n"
+                                    f"权利人: {detail.get('assignee','')}\n"
+                                    f"摘要: {detail.get('abstract','')}\n"
+                                    f"权利要求: {detail.get('claims','')}\n"
+                                    f"公开日: {detail.get('pub_date','')}\n"
+                                    f"链接: {detail.get('url','')}"
+                                )[:3000]
+                            else:
+                                tool_result = f"无法获取 {pid} 详情，请用 web_search 搜索替代。"
+
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc["id"],
+                            "content": tool_result,
+                        })
                 else:
-                    # Claude 完成分析，返回结果
                     content = msg.get("content", "")
                     if content and len(content) > 100:
                         return content
+                    if content:
+                        log.warning(f"OpenRouter returned short content: {content[:100]}")
                     break
 
     except Exception as e:
-        log.error(f"OpenRouter Claude tool_use failed: {e}")
+        log.error(f"OpenRouter Claude failed: {e}")
     return ""
 
 async def _llm_analyze_claude(prompt: str) -> str:
