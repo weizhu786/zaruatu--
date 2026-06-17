@@ -29,15 +29,18 @@ load_dotenv()
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 log = logging.getLogger("patent-review")
 
-# ── 配置 ────────────────────────────────────────────
-FEISHU_APP_ID = os.getenv("FEISHU_APP_ID")
-FEISHU_APP_SECRET = os.getenv("FEISHU_APP_SECRET")
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
-vision_mode = os.getenv("VISION_MODE", "openai")  # openai 或 gemini
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")  # TRO/维权搜索
+# ── 配置（延迟读取，避免 railpack 构建时检测为 build secret）───
+def _env(key: str, default: str = "") -> str:
+    return os.environ.get(key, default)
+
+FEISHU_APP_ID = _env("FEISHU_APP_ID")
+FEISHU_APP_SECRET = _env("FEISHU_APP_SECRET")
+ANTHROPIC_API_KEY = _env("ANTHROPIC_API_KEY")
+OPENAI_API_KEY = _env("OPENAI_API_KEY")
+OPENAI_BASE_URL = _env("OPENAI_BASE_URL", "https://api.openai.com/v1")
+vision_mode = _env("VISION_MODE", "openai")
+GEMINI_API_KEY = _env("GEMINI_API_KEY", "")
+TAVILY_API_KEY = _env("TAVILY_API_KEY", "")
 
 app = FastAPI(title="黑伞专利审核服务")
 
