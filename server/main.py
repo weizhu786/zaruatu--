@@ -34,6 +34,7 @@ from config import (
     FEISHU_APP_ID, FEISHU_APP_SECRET,
     ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENAI_BASE_URL,
     vision_mode, GEMINI_API_KEY, TAVILY_API_KEY,
+    OPENROUTER_KEY,
 )
 
 app = FastAPI(title="黑伞专利审核服务")
@@ -407,18 +408,18 @@ async def run_ai_review(form_data: dict, images: list = None) -> str:
     # ── Step 3: LLM 分析 ──
     prompt = build_analysis_prompt(form_data, search_text, image_description)
 
-    # 优先 Gemini（免费 1500次/天），Claude 有余额时自动切换
+    # 优先 OpenRouter Claude（有余额），fallback Gemini → DeepSeek
+    if OPENROUTER_KEY:
+        result = await _llm_analyze_openrouter(prompt)
+        if result and len(result) > 100:
+            return result
+        log.warning(f"[{product_label}] OpenRouter failed, fallback to Gemini")
+
     if GEMINI_API_KEY:
         result = await _llm_analyze_gemini(prompt)
         if result and len(result) > 100:
             return result
-        log.warning(f"[{product_label}] Gemini failed, fallback to Claude")
-
-    if ANTHROPIC_API_KEY:
-        result = await _llm_analyze_claude(prompt)
-        if result and len(result) > 100:
-            return result
-        log.warning(f"[{product_label}] Claude failed, fallback to DeepSeek")
+        log.warning(f"[{product_label}] Gemini failed, fallback to DeepSeek")
 
     if OPENAI_API_KEY:
         return await _llm_analyze_deepseek(prompt)
@@ -486,6 +487,36 @@ async def _llm_analyze_gemini(prompt: str) -> str:
         log.error(f"Gemini analysis failed: {e}")
         return ""
 
+
+async def _llm_analyze_openrouter(prompt: str) -> str:
+    """OpenRouter Claude Sonnet 4（通过 OpenRouter 代理，支持国内支付）"""
+    try:
+        async with httpx.AsyncClient(timeout=600) as c:
+            r = await c.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {OPENROUTER_KEY}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://railway.app",
+                    "X-Title": "Patent Review Bot",
+                },
+                json={
+                    "model": "anthropic/claude-sonnet-4-20250514",
+                    "max_tokens": 8000,
+                    "temperature": 0.1,
+                    "messages": [
+                        {"role": "system", "content": FULL_SYSTEM_PROMPT},
+                        {"role": "user", "content": prompt},
+                    ],
+                },
+            )
+            if r.status_code == 200:
+                data = r.json()
+                return data["choices"][0]["message"]["content"]
+            log.warning(f"OpenRouter returned {r.status_code}: {r.text[:200]}")
+    except Exception as e:
+        log.error(f"OpenRouter failed: {e}")
+    return ""
 
 async def _llm_analyze_claude(prompt: str) -> str:
     """Claude Sonnet 4 分析（最准确）"""

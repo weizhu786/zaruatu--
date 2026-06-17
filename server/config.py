@@ -34,3 +34,4 @@ OPENAI_BASE_URL   = _cfg.OPENAI_BASE_URL     # type: ignore
 vision_mode       = _cfg.VISION_MODE         # type: ignore
 GEMINI_API_KEY    = _cfg.GEMINI_API_KEY      # type: ignore
 TAVILY_API_KEY    = _cfg.TAVILY_API_KEY or "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"  # type: ignore
+OPENROUTER_KEY    = _cfg.OPENROUTER_API_KEY or ""  # type: ignore
