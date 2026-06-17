@@ -188,8 +188,6 @@ def parse_chat_message(text: str) -> Optional[dict]:
 
 # ── AI 审查引擎（v2: 多源检索 + 完整五层框架）────────────────
 
-import sys
-sys.path.insert(0, os.path.dirname(__file__))
 from search_engine import (
     run_full_search,
     format_search_results,
