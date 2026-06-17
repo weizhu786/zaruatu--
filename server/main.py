@@ -610,8 +610,9 @@ async def _llm_analyze_openrouter(product_info: str, form_data: dict) -> str:
                         elif func["name"] == "fetch_patent":
                             pid = args.get("patent_id", "")
                             log.info(f"Claude fetch_patent: {pid}")
+                            # 先尝试直接获取
                             detail = await fetch_patent_detail(pid)
-                            if detail and not detail.get("error"):
+                            if detail and not detail.get("error") and detail.get("title"):
                                 tool_result = (
                                     f"专利号: {detail.get('id','')}\n"
                                     f"标题: {detail.get('title','')}\n"
@@ -622,7 +623,14 @@ async def _llm_analyze_openrouter(product_info: str, form_data: dict) -> str:
                                     f"链接: {detail.get('url','')}"
                                 )[:3000]
                             else:
-                                tool_result = f"无法获取 {pid} 详情，请用 web_search 搜索替代。"
+                                # 直连失败 → 通过 Tavily 搜索专利号获取详情
+                                tavily_result = await search_tavily(
+                                    f'"{pid}" patent Google Patents', TAVILY_API_KEY
+                                )
+                                if tavily_result:
+                                    tool_result = f"[通过 Tavily 获取]\n{tavily_result[:3000]}"
+                                else:
+                                    tool_result = f"无法获取 {pid} 详情（直连被封+Tavily 无结果）。建议用 web_search 搜索 '{pid} patent infringement lawsuit' 查找维权报道。"
 
                         messages.append({
                             "role": "tool",
