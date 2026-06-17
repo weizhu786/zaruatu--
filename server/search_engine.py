@@ -151,47 +151,85 @@ async def search_google_patents(
 
 
 def _parse_google_patents_results(html: str, country: str) -> list[dict]:
-    """从 Google Patents 搜索结果页提取专利信息"""
+    """从 Google Patents 搜索结果页提取专利信息（多模式匹配）"""
     results = []
-
-    # 匹配搜索结果条目
-    # Google Patents 结果通常包含 patent number 和 title
-    # 格式: <a href="/patent/US..."> 或 <a href="/patent/WO...">
-    patent_blocks = re.findall(
-        r'<a[^>]*href="(/patent/([A-Z]{2}\d+[A-Z]?\d*)/[^"]*)"[^>]*>(.*?)</a>',
-        html,
-        re.DOTALL,
-    )
-
     seen_ids = set()
-    for href, patent_id, raw_title in patent_blocks:
-        if patent_id in seen_ids:
+
+    # 模式1: <a href="/patent/XX123/en">Title</a>
+    for m in re.finditer(
+        r'href="(/patent/([A-Z]{2,4}\d+[A-Z]?\d*)(?:/[a-z]{2})?)"[^>]*>',
+        html, re.IGNORECASE
+    ):
+        pid = m.group(2).upper()
+        if pid in seen_ids:
             continue
-        seen_ids.add(patent_id)
+        seen_ids.add(pid)
 
-        title = re.sub(r'<[^>]+>', '', raw_title).strip()
-        if not title or len(title) < 5:
-            continue
+        # 尝试获取标题
+        tag_end = html.find('>', m.end())
+        next_close = html.find('</a>', m.end())
+        title_html = html[m.end():next_close] if next_close > 0 else ""
+        title = re.sub(r'<[^>]+>', '', title_html).strip()
 
-        # 过滤：只保留目标国家的专利
-        if country and country != "ALL":
-            if country == "US" and not patent_id.startswith("US"):
-                continue
-            elif country == "CN" and not patent_id.startswith("CN"):
-                continue
-            elif country == "EP" and not patent_id.startswith("EP"):
-                continue
-            elif country == "JP" and not patent_id.startswith("JP"):
-                continue
+        if country_filter(pid, country):
+            results.append(build_result(pid, title))
 
-        results.append({
-            "id": patent_id,
-            "title": title[:200],
-            "url": f"https://patents.google.com/patent/{patent_id}/en",
-            "source": "Google Patents",
-        })
+    # 模式2: <span class="result-title"> / <h3 class="result-title">
+    if not results:
+        for m in re.finditer(
+            r'(?:result-title|patent-result)[^>]*>\s*<a[^>]*href="[^"]*/([A-Z]{2,4}\d+[A-Z]?\d*)[^"]*"[^>]*>(.*?)</a>',
+            html, re.DOTALL | re.IGNORECASE
+        ):
+            pid = m.group(1).upper()
+            if pid in seen_ids:
+                continue
+            seen_ids.add(pid)
+            title = re.sub(r'<[^>]+>', '', m.group(2)).strip()
+            if country_filter(pid, country):
+                results.append(build_result(pid, title))
+
+    # 模式3: 搜索页面中任何 patent/XXNNNNNNN 链接
+    if not results:
+        for m in re.finditer(
+            r'/patent/([A-Z]{2,4}\d{4,}[A-Z]?\d*)/',
+            html, re.IGNORECASE
+        ):
+            pid = m.group(1).upper()
+            if pid not in seen_ids and country_filter(pid, country):
+                seen_ids.add(pid)
+                results.append(build_result(pid, ""))
+
+    # 模式4: 纯文本专利号匹配
+    if not results:
+        us_pat = re.findall(r'(?:USD?)\s*(\d[\d,]{4,}(?:[A-Z]\d)?)', html)
+        for num in us_pat:
+            pid = f"US{num.strip().replace(',','')}"
+            if pid not in seen_ids:
+                seen_ids.add(pid)
+                results.append(build_result(pid, ""))
 
     return results
+
+
+def country_filter(pid: str, country: str) -> bool:
+    """检查专利号是否属于目标国家"""
+    if not country or country == "ALL":
+        return True
+    prefixes = {"US": ["US"], "CN": ["CN"], "EP": ["EP"],
+                "JP": ["JP"], "KR": ["KR"], "AU": ["AU"],
+                "CA": ["CA"], "DE": ["DE"], "FR": ["FR"],
+                "GB": ["GB"], "WO": ["WO"]}
+    allowed = prefixes.get(country, [country])
+    return any(pid.startswith(p) for p in allowed)
+
+
+def build_result(pid: str, title: str) -> dict:
+    return {
+        "id": pid,
+        "title": title[:200] if title else "",
+        "url": f"https://patents.google.com/patent/{pid}/en",
+        "source": "Google Patents",
+    }
 
 
 async def fetch_patent_detail(patent_id: str) -> dict:
