@@ -539,36 +539,27 @@ async def run_full_search(
     tasks = {}
 
     # ── Tavily 为主力检索引擎 ──
-    # 策略：不直接搜专利数据库（Tavily 不理解专利语境），
-    # 而是搜维权报道/诉讼/TRO——这些文章会明确列出涉及的专利号
+    # 核心策略：跨境电商维权文章会明确列出专利号、案件号、权利人
+    # 最有效的方式是同时搜中英文维权报道
     if tavily_api_key:
-        # 设计专利 — 搜维权报道中的设计专利
-        tasks["tavily_design"] = search_tavily(
-            f'"{primary_kw}" "design patent" OR "外观设计" Amazon infringement lawsuit seller 2024 2025 2026',
+        # 英文维权报道（worldtro/sellerdefense 等 — 这些文章列专利号极准确）
+        tasks["tavily_en"] = search_tavily(
+            f'site:worldtro.com OR site:sellerdefense.cn "{primary_kw}" patent infringement lawsuit Amazon 2024 2025',
             tavily_api_key)
 
-        # 发明专利 — 搜侵权诉讼报道
-        tasks["tavily_utility"] = search_tavily(
-            f'"{primary_kw}" "patent infringement" Amazon seller lawsuit USPTO 2024 2025 2026',
-            tavily_api_key)
-
-        # TRO 案件（最重要！TRO 报道一定列专利号）
-        tasks["tavily_tro"] = search_tavily(
-            f'"{primary_kw}" TRO "temporary restraining order" OR "临时禁令" Amazon 2024 2025 2026',
-            tavily_api_key)
-
-        # 跨境电商维权预警（中文社区 + 权利人名称搜索）
+        # 中文维权预警（AMZ123/麦家支持/跨境魔方 — 中国卖家维权信息主渠道）
         tasks["tavily_cn"] = search_tavily(
-            f'{primary_kw} 磁吸 钥匙盒 专利维权 侵权 TRO 亚马逊 sellerdefense worldtro AMZ123 卖家 冻结 2024 2025 2026',
-            tavily_api_key)
-        # 权利人+专利号搜索（维权文章标题格式："品牌+专利号+维权"）
-        tasks["tavily_owner"] = search_tavily(
-            f'"{primary_kw}" "USD" OR "US" patent owner lawsuit Amazon 50 sellers 2024 2025',
+            f'{primary_kw} 专利维权 侵权 TRO 亚马逊 sellerdefense 麦家支持 AMZ123 卖家店铺 冻结 2024 2025',
             tavily_api_key)
 
-        # Keith 版权专项
-        tasks["tavily_keith"] = search_tavily(
-            f'Keith "{primary_kw}" copyright VA lawsuit Amazon sellers 2024 2025 2026',
+        # TRO 案件号搜索（维权文章标题格式："24-cv-xxxx" + 产品名）
+        tasks["tavily_tro"] = search_tavily(
+            f'"{primary_kw}" "cv-" OR "TRO" OR "临时禁令" Amazon 卖家 冻结 2024 2025',
+            tavily_api_key)
+
+        # 通用专利诉讼搜索（可能命中多卖家维权案）
+        tasks["tavily_patent"] = search_tavily(
+            f'"{primary_kw}" "design patent" OR "外观专利" lawsuit 50 sellers Amazon 2024 2025',
             tavily_api_key)
 
         # 商标
@@ -577,7 +568,7 @@ async def run_full_search(
 
         # 市场验证
         tasks["tavily_market"] = search_tavily(
-            f'"{primary_kw}" AliExpress Amazon sellers 2025',
+            f'"{primary_kw}" AliExpress Amazon sellers supplier 2025',
             tavily_api_key)
 
     # ── 专利网站辅助（可能被封，有就更好）──
