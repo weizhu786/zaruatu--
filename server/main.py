@@ -1020,8 +1020,11 @@ async def _handle_chat_message(event: dict, body: dict):
 
     log.info(f"Chat [{chat_id}]: {text[:200]}")
 
+    # 去掉 @机器人 前缀
+    clean = re.sub(r'@\S+\s*', '', text).strip()
+
     # ── 第二步：用户确认开始审查 ──
-    if text.strip().lower() in ("开始", "确认", "go", "start", "yes", "ok", "1"):
+    if clean.lower() in ("开始", "确认", "go", "start", "yes", "ok", "1"):
         # 防重复——直接锁 pending_reviews 里的数据
         existing = pending_reviews.get(review_key) or pending_reviews.get(chat_id)
         if not existing or existing.get("_locked"):
